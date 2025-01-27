@@ -8,13 +8,12 @@ const port = process.env.PORT || 5000;
 
 // Middleware
 app.use(express.json());
-app.use(
-  cors({
-    origin: ["http://localhost:5173"],
-    credentials: true,
-    methods: ['GET', 'POST']
-  })
-);
+app.use(cors({
+  origin: 'http://localhost:5173', // Allow requests from your frontend
+  methods: ['GET', 'POST', 'PUT', 'DELETE'], // Allow the PUT method
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true // If using cookies
+}));
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.zhb6u.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -385,6 +384,7 @@ app.post("/api/payments", async (req, res) => {
     }
   });
 
+
     // APPROVE CLASS
 app.put('/classes/:id/approve', async (req, res) => {
     try {
@@ -620,6 +620,52 @@ app.put('/classes/:id/approve', async (req, res) => {
         });
       }
     });
+
+
+    // student dashboard
+    // GET: Fetch Enrolled Classes for a User
+app.get("/enrolled-classes/:userId", async (req, res) => {
+    try {
+      const { userId } = req.params;
+      
+      // Find all enrollments for the user
+      const enrollments = await database.collection('enrollments')
+        .find({ userId })
+        .toArray();
+      
+      // Get the class IDs from enrollments
+      const classIds = enrollments.map(enrollment => enrollment.classId);
+      
+      // Fetch the actual class details
+      const enrolledClasses = await classCollection
+        .find({ _id: { $in: classIds } })
+        .toArray();
+      
+      // Merge enrollment data (progress) with class details
+      const enrichedClasses = enrolledClasses.map(classItem => {
+        const enrollment = enrollments.find(
+          e => e.classId.toString() === classItem._id.toString()
+        );
+        return {
+          ...classItem,
+          progress: enrollment.progress,
+          enrolledAt: enrollment.enrolledAt
+        };
+      });
+  
+      res.json({
+        success: true,
+        enrolledClasses: enrichedClasses
+      });
+      
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Error fetching enrolled classes",
+        error: error.message
+      });
+    }
+  });
 
     await client.db("admin").command({ ping: 1 });
     console.log("Connected to MongoDB!");
