@@ -168,8 +168,25 @@ app.get("/classes", async (req, res) => {
       });
     }
   });
+  
 
+  // Get user role by email
+  app.get('/users', async (req, res) => {
+    try {
+        const email = req.query.email;
+        
+        if (email) {
+            const users = await userCollection.find({ email }).toArray();
+            return res.json(users);
+        }
 
+        const allUsers = await userCollection.find().toArray();
+        res.json(allUsers);
+
+    } catch (error) {
+        res.status(500).json({ message: 'Server error' });
+    }
+});
     // CREATE: Register New User
     app.post("/users", async (req, res) => {
       try {
@@ -206,17 +223,7 @@ app.get("/classes", async (req, res) => {
       }
     });
     // get users 
-    app.get("/users", async (req, res) => {
-      try {
-        const users = await userCollection.find().toArray();
-        res.json(users);
-      } catch (error) {
-        res.status(500).json({
-          message: "Error fetching users",
-          error: error.message,
-        });
-      }
-    });
+
 
     // UPDATE: Make User Admin
     app.put("/users/:id/make-admin", async (req, res) => {
@@ -282,16 +289,6 @@ app.get("/classes", async (req, res) => {
 app.post("/api/payments", async (req, res) => {
     try {
       const { classId, userId, amount, cardNumber, expiryDate, cvv } = req.body;
-  
-    //   // Validate user exists
-    //   const user = await userCollection.findOne({ uid: userId });
-    //   if (!user) {
-    //     return res.status(404).json({
-    //       success: false,
-    //       message: 'User not found'
-    //     });
-    //   }
-  
       // Validate class exists
       const classExists = await classCollection.findOne({
         _id: new ObjectId(classId)
