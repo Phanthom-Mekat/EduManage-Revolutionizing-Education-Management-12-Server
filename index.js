@@ -666,6 +666,129 @@ app.get("/enrolled-classes/:userId", async (req, res) => {
       });
     }
   });
+  
+  // GET: Fetch Class Assignments
+app.get("/classes/:id/assignments", async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      const assignments = await assignmentCollection
+        .find({ classId: new ObjectId(id) })
+        .toArray();
+      
+      // Get submission counts for each assignment
+      const assignmentsWithCounts = await Promise.all(
+        assignments.map(async (assignment) => {
+          const submissionCount = await submissionCollection.countDocuments({
+            assignmentId: assignment._id
+          });
+          return { ...assignment, submissionCount };
+        })
+      );
+  
+      res.json({
+        success: true,
+        assignments: assignmentsWithCounts
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Error fetching assignments",
+        error: error.message
+      });
+    }
+  });
+  
+  // POST: Submit Assignment
+  app.post("/assignments/:id/submit", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { userId } = req.body;
+  
+      // Check if assignment exists
+      const assignment = await assignmentCollection.findOne({
+        _id: new ObjectId(id)
+      });
+  
+      if (!assignment) {
+        return res.status(404).json({
+          success: false,
+          message: "Assignment not found"
+        });
+      }
+  
+      // Create submission record
+      const submission = {
+        assignmentId: new ObjectId(id),
+        userId,
+        submittedAt: new Date(),
+        status: 'submitted',
+        // Add file handling logic here if needed
+      };
+  
+      const result = await submissionCollection.insertOne(submission);
+  
+      // Update class submission count
+      await classCollection.updateOne(
+        { _id: assignment.classId },
+        { $inc: { totalSubmissions: 1 } }
+      );
+  
+      res.status(201).json({
+        success: true,
+        message: "Assignment submitted successfully",
+        submissionId: result.insertedId
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Error submitting assignment",
+        error: error.message
+      });
+    }
+  });
+  
+  // POST: Submit Class Evaluation
+  app.post("/classes/:id/evaluate", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { userId, rating, description } = req.body;
+  
+      // Create evaluation record
+      const evaluation = {
+        classId: new ObjectId(id),
+        userId,
+        rating,
+        description,
+        submittedAt: new Date()
+      };
+  
+      await database.collection('evaluations').insertOne(evaluation);
+  
+      // Update class average rating
+      const evaluations = await database.collection('evaluations')
+        .find({ classId: new ObjectId(id) })
+        .toArray();
+      
+      const averageRating = evaluations.reduce((acc, curr) => acc + curr.rating, 0) / evaluations.length;
+  
+      await classCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { averageRating } }
+      );
+  
+      res.json({
+        success: true,
+        message: "Evaluation submitted successfully"
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Error submitting evaluation",
+        error: error.message
+      });
+    }
+  });
 
     await client.db("admin").command({ ping: 1 });
     console.log("Connected to MongoDB!");
