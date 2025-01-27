@@ -279,7 +279,63 @@ app.get("/classes", async (req, res) => {
 
 // Process Payment
 // CREATE: Process Payment
-
+app.post("/api/payments", async (req, res) => {
+    try {
+      const { classId, userId, amount, cardNumber, expiryDate, cvv } = req.body;
+  
+    //   // Validate user exists
+    //   const user = await userCollection.findOne({ uid: userId });
+    //   if (!user) {
+    //     return res.status(404).json({
+    //       success: false,
+    //       message: 'User not found'
+    //     });
+    //   }
+  
+      // Validate class exists
+      const classExists = await classCollection.findOne({
+        _id: new ObjectId(classId)
+      });
+      if (!classExists) {
+        return res.status(404).json({
+          success: false,
+          message: 'Class not found'
+        });
+      }
+  
+      // Basic payment validation
+      if (!cardNumber || !expiryDate || !cvv) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid payment details'
+        });
+      }
+  
+      // Create payment record
+      const payment = {
+        classId: new ObjectId(classId),
+        userId,
+        amount,
+        status: 'completed',
+        createdAt: new Date()
+      };
+  
+      await database.collection('payments').insertOne(payment);
+  
+      res.json({
+        success: true,
+        message: 'Payment processed successfully',
+        transactionId: `TXN-${Date.now()}`
+      });
+  
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: 'Payment processing failed',
+        error: error.message
+      });
+    }
+  });
   
   // Handle Enrollment
   app.post('/enroll', async (req, res) => {
