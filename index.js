@@ -1,6 +1,6 @@
 const express = require('express');
 const cors = require('cors');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId, Admin } = require('mongodb');
 require('dotenv').config();
 
 const app = express();
@@ -27,13 +27,15 @@ async function run() {
   try {
     await client.connect();
     const database = client.db("learnify");
-    const classCollection = database.collection("classes");
+    const teacherRequestCollection = database.collection("reqteachers");
     const userCollection = database.collection("users");
-
+    const classCollection = database.collection("classes");
+    const assignmentCollection = database.collection("assignments");
+    const submissionCollection = database.collection("submissions");
     // Existing routes...
 
     // CREATE: Submit Class
-    app.post('/classes', async (req, res) => {
+    app.post('/reqteachers', async (req, res) => {
       try {
         const classData = {
           ...req.body,
@@ -41,7 +43,7 @@ async function run() {
           createdAt: new Date()
         };
 
-        const result = await classCollection.insertOne(classData);
+        const result = await teacherRequestCollection.insertOne(classData);
         
         res.status(201).json({
           message: 'Class submitted successfully',
@@ -56,7 +58,7 @@ async function run() {
     });
 
     // READ: Get All Classes
-    app.get('/classes', async (req, res) => {
+    app.get('/reqteachers', async (req, res) => {
       try {
         const { category, experience, page = 1, limit = 10 } = req.query;
         
@@ -64,13 +66,13 @@ async function run() {
         if (category) query.category = category;
         if (experience) query.experience = experience;
 
-        const classes = await classCollection
+        const classes = await teacherRequestCollection
           .find(query)
           .skip((page - 1) * limit)
           .limit(Number(limit))
           .toArray();
 
-        const total = await classCollection.countDocuments(query);
+        const total = await teacherRequestCollection.countDocuments(query);
 
         res.json({
           classes,
@@ -88,7 +90,7 @@ async function run() {
     // New routes for admin dashboard...
 
     // UPDATE: Approve or Reject Teacher Request
-    app.put('/classes/:id/:action', async (req, res) => {
+    app.put('/reqteachers/:id/:action', async (req, res) => {
       try {
         const { id, action } = req.params;
         const validActions = ['approve', 'reject'];
@@ -97,7 +99,7 @@ async function run() {
           return res.status(400).json({ message: 'Invalid action' });
         }
 
-        const result = await classCollection.updateOne(
+        const result = await teacherRequestCollection.updateOne(
           { _id: new ObjectId(id) },
           { $set: { status: action === 'approve' ? 'approved' : 'rejected' } }
         );
@@ -108,7 +110,7 @@ async function run() {
 
         // If approved, update user role to teacher
         if (action === 'approve') {
-          const classDetails = await classCollection.findOne({ _id: new ObjectId(id) });
+          const classDetails = await teacherRequestCollection.findOne({ _id: new ObjectId(id) });
           await userCollection.updateOne(
             { email: classDetails.instructorEmail },
             { $set: { role: 'teacher' } }
@@ -227,28 +229,146 @@ app.post('/users', async (req, res) => {
       }
     });
 
-    // UPDATE: Update Class Progress
-    app.put('/classes/:id/progress', async (req, res) => {
+    // teacher Admin route 
+
+
+    // CREATE: Submit Class
+    app.post('/classes', async (req, res) => {
       try {
-        const { id } = req.params;
-        const { progress } = req.body;
-        const result = await classCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { progress } }
-        );
+        const classData = {
+          ...req.body,
+          status: 'pending',
+          createdAt: new Date(),
+          totalEnrollment: 0,
+          totalAssignments: 0,
+          totalSubmissions: 0
+        };
 
-        if (result.modifiedCount === 0) {
-          return res.status(404).json({ message: 'Class not found' });
-        }
-
-        res.json({ message: 'Class progress updated successfully' });
+        const result = await classCollection.insertOne(classData);
+        
+        res.status(201).json({
+          message: 'Class submitted successfully',
+          classId: result.insertedId
+        });
       } catch (error) {
         res.status(500).json({ 
-          message: 'Error updating class progress', 
+          message: 'Error submitting class', 
           error: error.message 
         });
       }
     });
+
+    // READ: Get Classes for a Teacher
+    app.get('/classes', async (req, res) => {
+      try {
+        const { instructorEmail, page = 1, limit = 10 } = req.query;
+        
+        let query = {};
+        if (instructorEmail) query.instructorEmail = instructorEmail;
+
+        const classes = await classCollection
+          .find(query)
+          .skip((page - 1) * limit)
+          .limit(Number(limit))
+          .toArray();
+
+        const total = await classCollection.countDocuments(query);
+
+        res.json({
+          classes,
+          totalPages: Math.ceil(total / limit),
+          currentPage: Number(page)
+        });
+      } catch (error) {
+        res.status(500).json({ 
+          message: 'Error fetching classes', 
+          error: error.message 
+        });
+      }
+    });
+
+    // READ: Get Class Details
+    app.get('/classes/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const classDetails = await classCollection.findOne({ _id: new ObjectId(id) });
+        if (!classDetails) {
+          return res.status(404).json({ message: 'Class not found' });
+        }
+        res.json(classDetails);
+      } catch (error) {
+        res.status(500).json({ 
+          message: 'Error fetching class details', 
+          error: error.message 
+        });
+      }
+    });
+
+    // UPDATE: Update Class
+    app.put('/classes/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { title, price, description, image } = req.body;
+        const result = await classCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { title, price, description, image } }
+        );
+        if (result.modifiedCount === 0) {
+          return res.status(404).json({ message: 'Class not found or no changes made' });
+        }
+        res.json({ message: 'Class updated successfully' });
+      } catch (error) {
+        res.status(500).json({ 
+          message: 'Error updating class', 
+          error: error.message 
+        });
+      }
+    });
+
+    // DELETE: Delete Class
+    app.delete('/classes/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const result = await classCollection.deleteOne({ _id: new ObjectId(id) });
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ message: 'Class not found' });
+        }
+        res.json({ message: 'Class deleted successfully' });
+      } catch (error) {
+        res.status(500).json({ 
+          message: 'Error deleting class', 
+          error: error.message 
+        });
+      }
+    });
+
+    // CREATE: Add Assignment
+    app.post('/classes/:id/assignments', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const assignmentData = {
+          ...req.body,
+          classId: new ObjectId(id),
+          createdAt: new Date()
+        };
+        const result = await assignmentCollection.insertOne(assignmentData);
+        await classCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $inc: { totalAssignments: 1 } }
+        );
+        res.status(201).json({
+          message: 'Assignment created successfully',
+          assignmentId: result.insertedId
+        });
+      } catch (error) {
+        res.status(500).json({ 
+          message: 'Error creating assignment', 
+          error: error.message 
+        });
+      }
+    });
+
+
 
     // READ: Get User Role
     app.get('/users/:uid/role', async (req, res) => {
