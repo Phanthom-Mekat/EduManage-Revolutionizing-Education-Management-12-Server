@@ -748,47 +748,118 @@ app.get("/classes/:id/assignments", async (req, res) => {
     }
   });
   
-  // POST: Submit Class Evaluation
-  app.post("/classes/:id/evaluate", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { userId, rating, description } = req.body;
-  
-      // Create evaluation record
-      const evaluation = {
-        classId: new ObjectId(id),
-        userId,
-        rating,
-        description,
-        submittedAt: new Date()
-      };
-  
-      await database.collection('evaluations').insertOne(evaluation);
-  
-      // Update class average rating
-      const evaluations = await database.collection('evaluations')
-        .find({ classId: new ObjectId(id) })
-        .toArray();
-      
-      const averageRating = evaluations.reduce((acc, curr) => acc + curr.rating, 0) / evaluations.length;
-  
-      await classCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { averageRating } }
-      );
-  
-      res.json({
-        success: true,
-        message: "Evaluation submitted successfully"
-      });
-    } catch (error) {
-      res.status(500).json({
+// POST: Submit Class Evaluation
+app.post("/classes/:id/evaluate", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId, name, photo, rating, description } = req.body;
+
+    // Check if user has already submitted a review
+    const existingReview = await database.collection('evaluations').findOne({
+      classId: new ObjectId(id),
+      userId: userId
+    });
+
+    if (existingReview) {
+      return res.status(400).json({
         success: false,
-        message: "Error submitting evaluation",
-        error: error.message
+        message: "You have already submitted a review for this class"
       });
     }
-  });
+
+    // Create evaluation record with user details
+    const evaluation = {
+      classId: new ObjectId(id),
+      userId,
+      name,
+      photo,
+      rating,
+      description,
+      submittedAt: new Date()
+    };
+
+    await database.collection('evaluations').insertOne(evaluation);
+
+    // Update class average rating
+    const evaluations = await database.collection('evaluations')
+      .find({ classId: new ObjectId(id) })
+      .toArray();
+    
+    const averageRating = evaluations.reduce((acc, curr) => acc + curr.rating, 0) / evaluations.length;
+
+    await classCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { 
+        $set: { 
+          averageRating,
+          totalReviews: evaluations.length 
+        } 
+      }
+    );
+
+    res.json({
+      success: true,
+      message: "Evaluation submitted successfully"
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error submitting evaluation",
+      error: error.message
+    });
+  }
+});
+
+  // GET: Fetch All Reviews Across All Classes
+app.get("/reviews", async (req, res) => {
+  try {
+    // Get all reviews and populate with class details
+    const reviews = await database.collection('evaluations')
+      .aggregate([
+        {
+          $lookup: {
+            from: 'classes',
+            localField: 'classId',
+            foreignField: '_id',
+            as: 'classDetails'
+          }
+        },
+        {
+          $unwind: '$classDetails'
+        },
+        {
+          $project: {
+            userId: 1,
+            name: 1,
+            photo: 1,
+            rating: 1,
+            description: 1,
+            submittedAt: 1,
+            className: '$classDetails.title',
+            instructorName: '$classDetails.instructorName',
+            classImage: '$classDetails.image'
+          }
+        },
+        {
+          $sort: { submittedAt: -1 }
+        }
+      ])
+      .toArray();
+
+    res.json({
+      success: true,
+      reviews
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error fetching all reviews",
+      error: error.message
+    });
+  }
+});
+
+
 
     await client.db("admin").command({ ping: 1 });
     console.log("Connected to MongoDB!");
