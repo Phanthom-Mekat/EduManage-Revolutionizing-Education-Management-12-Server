@@ -8,12 +8,14 @@ const port = process.env.PORT || 5000;
 
 // Middleware
 app.use(express.json());
-app.use(cors({
-  origin: 'http://localhost:5173', // Allow requests from your frontend
-  methods: ['GET', 'POST', 'PUT', 'DELETE'], // Allow the PUT method
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true // If using cookies
-}));
+app.use(
+  cors({
+    origin: "http://localhost:5173", // Allow requests from your frontend
+    methods: ["GET", "POST", "PUT", "DELETE"], // Allow the PUT method
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true, // If using cookies
+  })
+);
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.zhb6u.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -134,58 +136,56 @@ async function run() {
 
     // READ: Get All Users
     // READ: Get Classes
-app.get("/classes", async (req, res) => {
-    try {
-      const { 
-        instructorEmail, 
-        status,  // Add status parameter
-        page = 1, 
-        limit = 10 
-      } = req.query;
-  
-      let query = {};
-      if (instructorEmail) query.instructorEmail = instructorEmail;
-      if (status) query.status = status;  // Add status filter
-  
-      const classes = await classCollection
-        .find(query)
-        .skip((page - 1) * limit)
-        .limit(Number(limit))
-        .toArray();
-  
-      const total = await classCollection.countDocuments(query);
-  
-      res.json({
-        classes,
-        totalPages: Math.ceil(total / limit),
-        currentPage: Number(page)
-      });
-    } catch (error) {
-      res.status(500).json({
-        message: "Error fetching classes",
-        error: error.message
-      });
-    }
-  });
-  
+    app.get("/classes", async (req, res) => {
+      try {
+        const {
+          instructorEmail,
+          status, // Add status parameter
+          page = 1,
+          limit = 10,
+        } = req.query;
 
-  // Get user role by email
-  app.get('/users', async (req, res) => {
-    try {
+        let query = {};
+        if (instructorEmail) query.instructorEmail = instructorEmail;
+        if (status) query.status = status; // Add status filter
+
+        const classes = await classCollection
+          .find(query)
+          .skip((page - 1) * limit)
+          .limit(Number(limit))
+          .toArray();
+
+        const total = await classCollection.countDocuments(query);
+
+        res.json({
+          classes,
+          totalPages: Math.ceil(total / limit),
+          currentPage: Number(page),
+        });
+      } catch (error) {
+        res.status(500).json({
+          message: "Error fetching classes",
+          error: error.message,
+        });
+      }
+    });
+
+    // Get user role by email
+    app.get("/users", async (req, res) => {
+      try {
         const email = req.query.email;
-        
+
         if (email) {
-            const users = await userCollection.find({ email }).toArray();
-            return res.json(users);
+          const users = await userCollection.find({ email }).toArray();
+          return res.json(users);
         }
 
         const allUsers = await userCollection.find().toArray();
         res.json(allUsers);
-
-    } catch (error) {
-        res.status(500).json({ message: 'Server error' });
-    }
-});
+      } catch (error) {
+        res.status(500).json({ message: "Server error" });
+      }
+    });
     // CREATE: Register New User
     app.post("/users", async (req, res) => {
       try {
@@ -221,8 +221,7 @@ app.get("/classes", async (req, res) => {
         });
       }
     });
-    // get users 
-
+    // get users
 
     // UPDATE: Make User Admin
     app.put("/users/:id/make-admin", async (req, res) => {
@@ -247,7 +246,58 @@ app.get("/classes", async (req, res) => {
         });
       }
     });
+    // UPDATE: Update user role to teacher by email
+   // PUT /users/make-teacher
+app.put("/make-teacher", async (req, res) => {
+  try {
+    const { email } = req.body;
+    const result = await userCollection.updateOne(
+      { email },
+      { $set: { role: "teacher" } }
+    );
 
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({ 
+        message: "User not found or already a teacher" 
+      });
+    }
+
+    res.json({ message: "User role updated to teacher" });
+  } catch (error) {
+    res.status(500).json({ 
+      message: "Error updating role", 
+      error: error.message 
+    });
+  }
+});
+  // UPDATE: Update user role dynamically
+app.put("/users/:id/update-role", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body;
+
+    // Validate the role
+    if (!["admin", "teacher", "student"].includes(role)) {
+      return res.status(400).json({ message: "Invalid role" });
+    }
+
+    const result = await userCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { role } }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({ message: "User not found or role already set" });
+    }
+
+    res.json({ message: `User role updated to ${role} successfully` });
+  } catch (error) {
+    res.status(500).json({
+      message: "Error updating user role",
+      error: error.message,
+    });
+  }
+});
     // READ: Search Users
     app.get("/users/search", async (req, res) => {
       try {
@@ -281,160 +331,166 @@ app.get("/classes", async (req, res) => {
       }
     });
 
+    // Process Payment
+    // CREATE: Process Payment
+    app.post("/api/payments", async (req, res) => {
+      try {
+        const { classId, userId, amount, cardNumber, expiryDate, cvv } =
+          req.body;
+        // Validate class exists
+        const classExists = await classCollection.findOne({
+          _id: new ObjectId(classId),
+        });
+        if (!classExists) {
+          return res.status(404).json({
+            success: false,
+            message: "Class not found",
+          });
+        }
 
+        // Basic payment validation
+        if (!cardNumber || !expiryDate || !cvv) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid payment details",
+          });
+        }
 
-// Process Payment
-// CREATE: Process Payment
-app.post("/api/payments", async (req, res) => {
-    try {
-      const { classId, userId, amount, cardNumber, expiryDate, cvv } = req.body;
-      // Validate class exists
-      const classExists = await classCollection.findOne({
-        _id: new ObjectId(classId)
-      });
-      if (!classExists) {
-        return res.status(404).json({
+        // Create payment record
+        const payment = {
+          classId: new ObjectId(classId),
+          userId,
+          amount,
+          status: "completed",
+          createdAt: new Date(),
+        };
+
+        await database.collection("payments").insertOne(payment);
+
+        res.json({
+          success: true,
+          message: "Payment processed successfully",
+          transactionId: `TXN-${Date.now()}`,
+        });
+      } catch (error) {
+        res.status(500).json({
           success: false,
-          message: 'Class not found'
+          message: "Payment processing failed",
+          error: error.message,
         });
       }
-  
-      // Basic payment validation
-      if (!cardNumber || !expiryDate || !cvv) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invalid payment details'
-        });
-      }
-  
-      // Create payment record
-      const payment = {
-        classId: new ObjectId(classId),
-        userId,
-        amount,
-        status: 'completed',
-        createdAt: new Date()
-      };
-  
-      await database.collection('payments').insertOne(payment);
-  
-      res.json({
-        success: true,
-        message: 'Payment processed successfully',
-        transactionId: `TXN-${Date.now()}`
-      });
-  
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: 'Payment processing failed',
-        error: error.message
-      });
-    }
-  });
-  
-  // Handle Enrollment
-  app.post('/enroll', async (req, res) => {
-    try {
-      const { classId, userId } = req.body;
-  
-      // Check existing enrollment
-      const existingEnrollment = await database.collection('enrollments').findOne({
-        classId: new ObjectId(classId),
-        userId: userId
-      });
-  
-      if (existingEnrollment) {
-        return res.status(400).json({
-          success: false,
-          message: 'User already enrolled in this class'
-        });
-      }
-  
-      // Create enrollment record
-      const enrollment = {
-        classId: new ObjectId(classId),
-        userId,
-        enrolledAt: new Date(),
-        progress: 0,
-        completed: false
-      };
-  
-      // Update class enrollment count
-      const updateResult = await classCollection.updateOne(
-        { _id: new ObjectId(classId) },
-        { $inc: { totalEnrollment: 1 } }
-      );
-  
-      // Create enrollment
-      const enrollmentResult = await database.collection('enrollments').insertOne(enrollment);
-  
-      res.json({
-        success: true,
-        message: 'Enrollment successful',
-        enrollmentId: enrollmentResult.insertedId
-      });
-  
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: 'Enrollment failed',
-        error: error.message
-      });
-    }
-  });
+    });
 
+    // Handle Enrollment
+    app.post("/enroll", async (req, res) => {
+      try {
+        const { classId, userId } = req.body;
+
+        // Check existing enrollment
+        const existingEnrollment = await database
+          .collection("enrollments")
+          .findOne({
+            classId: new ObjectId(classId),
+            userId: userId,
+          });
+
+        if (existingEnrollment) {
+          return res.status(400).json({
+            success: false,
+            message: "User already enrolled in this class",
+          });
+        }
+
+        // Create enrollment record
+        const enrollment = {
+          classId: new ObjectId(classId),
+          userId,
+          enrolledAt: new Date(),
+          progress: 0,
+          completed: false,
+        };
+
+        // Update class enrollment count
+        const updateResult = await classCollection.updateOne(
+          { _id: new ObjectId(classId) },
+          { $inc: { totalEnrollment: 1 } }
+        );
+
+        // Create enrollment
+        const enrollmentResult = await database
+          .collection("enrollments")
+          .insertOne(enrollment);
+
+        res.json({
+          success: true,
+          message: "Enrollment successful",
+          enrollmentId: enrollmentResult.insertedId,
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Enrollment failed",
+          error: error.message,
+        });
+      }
+    });
 
     // APPROVE CLASS
-app.put('/classes/:id/approve', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const result = await classCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { status: 'approved' } }
-      );
-  
-      if (result.modifiedCount === 0) {
-        return res.status(404).json({ message: 'Class not found or already approved' });
+    app.put("/classes/:id/approve", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const result = await classCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status: "approved" } }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res
+            .status(404)
+            .json({ message: "Class not found or already approved" });
+        }
+
+        // Update user role to teacher if needed
+        const classDetails = await classCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        await userCollection.updateOne(
+          { email: classDetails.instructorEmail },
+          { $set: { role: "teacher" } }
+        );
+
+        res.json({ message: "Class approved successfully" });
+      } catch (error) {
+        res.status(500).json({
+          message: "Error approving class",
+          error: error.message,
+        });
       }
-  
-      // Update user role to teacher if needed
-      const classDetails = await classCollection.findOne({ _id: new ObjectId(id) });
-      await userCollection.updateOne(
-        { email: classDetails.instructorEmail },
-        { $set: { role: 'teacher' } }
-      );
-  
-      res.json({ message: 'Class approved successfully' });
-    } catch (error) {
-      res.status(500).json({
-        message: 'Error approving class',
-        error: error.message
-      });
-    }
-  });
-  
-  // REJECT CLASS
-  app.put('/classes/:id/reject', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const result = await classCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { status: 'rejected' } }
-      );
-  
-      if (result.modifiedCount === 0) {
-        return res.status(404).json({ message: 'Class not found or already rejected' });
+    });
+
+    // REJECT CLASS
+    app.put("/classes/:id/reject", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const result = await classCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status: "rejected" } }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res
+            .status(404)
+            .json({ message: "Class not found or already rejected" });
+        }
+
+        res.json({ message: "Class rejected successfully" });
+      } catch (error) {
+        res.status(500).json({
+          message: "Error rejecting class",
+          error: error.message,
+        });
       }
-  
-      res.json({ message: 'Class rejected successfully' });
-    } catch (error) {
-      res.status(500).json({
-        message: 'Error rejecting class',
-        error: error.message
-      });
-    }
-  });
+    });
 
     // UPDATE: Update Class Progress
     app.put("/classes/:id/progress", async (req, res) => {
@@ -475,7 +531,6 @@ app.put('/classes/:id/approve', async (req, res) => {
         });
       }
     });
-
 
     // teacher Admin route
 
@@ -621,245 +676,248 @@ app.put('/classes/:id/approve', async (req, res) => {
       }
     });
 
-
     // student dashboard
     // GET: Fetch Enrolled Classes for a User
-app.get("/enrolled-classes/:userId", async (req, res) => {
-    try {
-      const { userId } = req.params;
-      
-      // Find all enrollments for the user
-      const enrollments = await database.collection('enrollments')
-        .find({ userId })
-        .toArray();
-      
-      // Get the class IDs from enrollments
-      const classIds = enrollments.map(enrollment => enrollment.classId);
-      
-      // Fetch the actual class details
-      const enrolledClasses = await classCollection
-        .find({ _id: { $in: classIds } })
-        .toArray();
-      
-      // Merge enrollment data (progress) with class details
-      const enrichedClasses = enrolledClasses.map(classItem => {
-        const enrollment = enrollments.find(
-          e => e.classId.toString() === classItem._id.toString()
-        );
-        return {
-          ...classItem,
-          progress: enrollment.progress,
-          enrolledAt: enrollment.enrolledAt
-        };
-      });
-  
-      res.json({
-        success: true,
-        enrolledClasses: enrichedClasses
-      });
-      
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: "Error fetching enrolled classes",
-        error: error.message
-      });
-    }
-  });
-  
-  // GET: Fetch Class Assignments
-app.get("/classes/:id/assignments", async (req, res) => {
-    try {
-      const { id } = req.params;
-      
-      const assignments = await assignmentCollection
-        .find({ classId: new ObjectId(id) })
-        .toArray();
-      
-      // Get submission counts for each assignment
-      const assignmentsWithCounts = await Promise.all(
-        assignments.map(async (assignment) => {
-          const submissionCount = await submissionCollection.countDocuments({
-            assignmentId: assignment._id
-          });
-          return { ...assignment, submissionCount };
-        })
-      );
-  
-      res.json({
-        success: true,
-        assignments: assignmentsWithCounts
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: "Error fetching assignments",
-        error: error.message
-      });
-    }
-  });
-  
-  // POST: Submit Assignment
-  app.post("/assignments/:id/submit", async (req, res) => {
-    try {
-      const { id } = req.params;
-      const { userId } = req.body;
-  
-      // Check if assignment exists
-      const assignment = await assignmentCollection.findOne({
-        _id: new ObjectId(id)
-      });
-  
-      if (!assignment) {
-        return res.status(404).json({
+    app.get("/enrolled-classes/:userId", async (req, res) => {
+      try {
+        const { userId } = req.params;
+
+        // Find all enrollments for the user
+        const enrollments = await database
+          .collection("enrollments")
+          .find({ userId })
+          .toArray();
+
+        // Get the class IDs from enrollments
+        const classIds = enrollments.map((enrollment) => enrollment.classId);
+
+        // Fetch the actual class details
+        const enrolledClasses = await classCollection
+          .find({ _id: { $in: classIds } })
+          .toArray();
+
+        // Merge enrollment data (progress) with class details
+        const enrichedClasses = enrolledClasses.map((classItem) => {
+          const enrollment = enrollments.find(
+            (e) => e.classId.toString() === classItem._id.toString()
+          );
+          return {
+            ...classItem,
+            progress: enrollment.progress,
+            enrolledAt: enrollment.enrolledAt,
+          };
+        });
+
+        res.json({
+          success: true,
+          enrolledClasses: enrichedClasses,
+        });
+      } catch (error) {
+        res.status(500).json({
           success: false,
-          message: "Assignment not found"
+          message: "Error fetching enrolled classes",
+          error: error.message,
         });
       }
-  
-      // Create submission record
-      const submission = {
-        assignmentId: new ObjectId(id),
-        userId,
-        submittedAt: new Date(),
-        status: 'submitted',
-        // Add file handling logic here if needed
-      };
-  
-      const result = await submissionCollection.insertOne(submission);
-  
-      // Update class submission count
-      await classCollection.updateOne(
-        { _id: assignment.classId },
-        { $inc: { totalSubmissions: 1 } }
-      );
-  
-      res.status(201).json({
-        success: true,
-        message: "Assignment submitted successfully",
-        submissionId: result.insertedId
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: "Error submitting assignment",
-        error: error.message
-      });
-    }
-  });
-  
-// POST: Submit Class Evaluation
-app.post("/classes/:id/evaluate", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { userId, name, photo, rating, description } = req.body;
-
-    // Check if user has already submitted a review
-    const existingReview = await database.collection('evaluations').findOne({
-      classId: new ObjectId(id),
-      userId: userId
     });
 
-    if (existingReview) {
-      return res.status(400).json({
-        success: false,
-        message: "You have already submitted a review for this class"
-      });
-    }
+    // GET: Fetch Class Assignments
+    app.get("/classes/:id/assignments", async (req, res) => {
+      try {
+        const { id } = req.params;
 
-    // Create evaluation record with user details
-    const evaluation = {
-      classId: new ObjectId(id),
-      userId,
-      name,
-      photo,
-      rating,
-      description,
-      submittedAt: new Date()
-    };
+        const assignments = await assignmentCollection
+          .find({ classId: new ObjectId(id) })
+          .toArray();
 
-    await database.collection('evaluations').insertOne(evaluation);
+        // Get submission counts for each assignment
+        const assignmentsWithCounts = await Promise.all(
+          assignments.map(async (assignment) => {
+            const submissionCount = await submissionCollection.countDocuments({
+              assignmentId: assignment._id,
+            });
+            return { ...assignment, submissionCount };
+          })
+        );
 
-    // Update class average rating
-    const evaluations = await database.collection('evaluations')
-      .find({ classId: new ObjectId(id) })
-      .toArray();
-    
-    const averageRating = evaluations.reduce((acc, curr) => acc + curr.rating, 0) / evaluations.length;
-
-    await classCollection.updateOne(
-      { _id: new ObjectId(id) },
-      { 
-        $set: { 
-          averageRating,
-          totalReviews: evaluations.length 
-        } 
+        res.json({
+          success: true,
+          assignments: assignmentsWithCounts,
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error fetching assignments",
+          error: error.message,
+        });
       }
-    );
-
-    res.json({
-      success: true,
-      message: "Evaluation submitted successfully"
     });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error submitting evaluation",
-      error: error.message
-    });
-  }
-});
 
-  // GET: Fetch All Reviews Across All Classes
-app.get("/reviews", async (req, res) => {
-  try {
-    // Get all reviews and populate with class details
-    const reviews = await database.collection('evaluations')
-      .aggregate([
-        {
-          $lookup: {
-            from: 'classes',
-            localField: 'classId',
-            foreignField: '_id',
-            as: 'classDetails'
-          }
-        },
-        {
-          $unwind: '$classDetails'
-        },
-        {
-          $project: {
-            userId: 1,
-            name: 1,
-            photo: 1,
-            rating: 1,
-            description: 1,
-            submittedAt: 1,
-            className: '$classDetails.title',
-            instructorName: '$classDetails.instructorName',
-            classImage: '$classDetails.image'
-          }
-        },
-        {
-          $sort: { submittedAt: -1 }
+    // POST: Submit Assignment
+    app.post("/assignments/:id/submit", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { userId } = req.body;
+
+        // Check if assignment exists
+        const assignment = await assignmentCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!assignment) {
+          return res.status(404).json({
+            success: false,
+            message: "Assignment not found",
+          });
         }
-      ])
-      .toArray();
 
-    res.json({
-      success: true,
-      reviews
+        // Create submission record
+        const submission = {
+          assignmentId: new ObjectId(id),
+          userId,
+          submittedAt: new Date(),
+          status: "submitted",
+          // Add file handling logic here if needed
+        };
+
+        const result = await submissionCollection.insertOne(submission);
+
+        // Update class submission count
+        await classCollection.updateOne(
+          { _id: assignment.classId },
+          { $inc: { totalSubmissions: 1 } }
+        );
+
+        res.status(201).json({
+          success: true,
+          message: "Assignment submitted successfully",
+          submissionId: result.insertedId,
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error submitting assignment",
+          error: error.message,
+        });
+      }
     });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: "Error fetching all reviews",
-      error: error.message
+
+    // POST: Submit Class Evaluation
+    app.post("/classes/:id/evaluate", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { userId, name, photo, rating, description } = req.body;
+
+        // Check if user has already submitted a review
+        const existingReview = await database
+          .collection("evaluations")
+          .findOne({
+            classId: new ObjectId(id),
+            userId: userId,
+          });
+
+        if (existingReview) {
+          return res.status(400).json({
+            success: false,
+            message: "You have already submitted a review for this class",
+          });
+        }
+
+        // Create evaluation record with user details
+        const evaluation = {
+          classId: new ObjectId(id),
+          userId,
+          name,
+          photo,
+          rating,
+          description,
+          submittedAt: new Date(),
+        };
+
+        await database.collection("evaluations").insertOne(evaluation);
+
+        // Update class average rating
+        const evaluations = await database
+          .collection("evaluations")
+          .find({ classId: new ObjectId(id) })
+          .toArray();
+
+        const averageRating =
+          evaluations.reduce((acc, curr) => acc + curr.rating, 0) /
+          evaluations.length;
+
+        await classCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              averageRating,
+              totalReviews: evaluations.length,
+            },
+          }
+        );
+
+        res.json({
+          success: true,
+          message: "Evaluation submitted successfully",
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error submitting evaluation",
+          error: error.message,
+        });
+      }
     });
-  }
-});
 
+    // GET: Fetch All Reviews Across All Classes
+    app.get("/reviews", async (req, res) => {
+      try {
+        // Get all reviews and populate with class details
+        const reviews = await database
+          .collection("evaluations")
+          .aggregate([
+            {
+              $lookup: {
+                from: "classes",
+                localField: "classId",
+                foreignField: "_id",
+                as: "classDetails",
+              },
+            },
+            {
+              $unwind: "$classDetails",
+            },
+            {
+              $project: {
+                userId: 1,
+                name: 1,
+                photo: 1,
+                rating: 1,
+                description: 1,
+                submittedAt: 1,
+                className: "$classDetails.title",
+                instructorName: "$classDetails.instructorName",
+                classImage: "$classDetails.image",
+              },
+            },
+            {
+              $sort: { submittedAt: -1 },
+            },
+          ])
+          .toArray();
 
+        res.json({
+          success: true,
+          reviews,
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error fetching all reviews",
+          error: error.message,
+        });
+      }
+    });
 
     await client.db("admin").command({ ping: 1 });
     console.log("Connected to MongoDB!");
