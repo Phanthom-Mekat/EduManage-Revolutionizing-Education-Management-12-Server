@@ -10,7 +10,7 @@ const port = process.env.PORT || 5000;
 app.use(express.json());
 app.use(
   cors({
-    origin: "http://localhost:5173", // Allow requests from your frontend
+    origin: ["http://localhost:5173", "https://educationmanage.netlify.app"],
     methods: ["GET", "POST", "PUT", "DELETE"], // Allow the PUT method
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true, // If using cookies
@@ -29,7 +29,8 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
+
     const database = client.db("learnify");
     const teacherRequestCollection = database.collection("reqteachers");
     const userCollection = database.collection("users");
@@ -919,8 +920,8 @@ app.put("/users/:id/update-role", async (req, res) => {
       }
     });
 
-    await client.db("admin").command({ ping: 1 });
-    console.log("Connected to MongoDB!");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Connected to MongoDB!");
   } catch (error) {
     console.error("MongoDB connection error:", error);
   }
