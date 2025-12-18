@@ -37,6 +37,7 @@ async function run() {
     const classCollection = database.collection("classes");
     const assignmentCollection = database.collection("assignments");
     const submissionCollection = database.collection("submissions");
+    const resourceCollection = database.collection("resources");
     // Existing routes...
 
     // CREATE: Submit Class
@@ -655,8 +656,12 @@ app.put("/users/:id/update-role", async (req, res) => {
     app.post("/classes/:id/assignments", async (req, res) => {
       try {
         const { id } = req.params;
+        const { title, description, deadline, maxPoints } = req.body;
         const assignmentData = {
-          ...req.body,
+          title,
+          description,
+          deadline,
+          maxPoints: maxPoints || 100,
           classId: new ObjectId(id),
           createdAt: new Date(),
         };
@@ -772,13 +777,40 @@ app.put("/users/:id/update-role", async (req, res) => {
           });
         }
 
-        // Create submission record
+        // Check if student already submitted
+        const existingSubmission = await submissionCollection.findOne({
+          assignmentId: new ObjectId(id),
+          userId,
+        });
+
+        if (existingSubmission) {
+          // Update existing submission
+          await submissionCollection.updateOne(
+            { _id: existingSubmission._id },
+            {
+              $set: {
+                submissionText: req.body.submissionText || '',
+                submissionUrl: req.body.submissionUrl || '',
+                submittedAt: new Date(),
+                status: "submitted",
+              },
+            }
+          );
+          return res.json({
+            success: true,
+            message: "Submission updated successfully",
+            submissionId: existingSubmission._id,
+          });
+        }
+
+        // Create new submission record
         const submission = {
           assignmentId: new ObjectId(id),
           userId,
+          submissionText: req.body.submissionText || '',
+          submissionUrl: req.body.submissionUrl || '',
           submittedAt: new Date(),
           status: "submitted",
-          // Add file handling logic here if needed
         };
 
         const result = await submissionCollection.insertOne(submission);
@@ -798,6 +830,291 @@ app.put("/users/:id/update-role", async (req, res) => {
         res.status(500).json({
           success: false,
           message: "Error submitting assignment",
+          error: error.message,
+        });
+      }
+    });
+
+    // =====================================================
+    // ASSIGNMENT MANAGEMENT ENDPOINTS
+    // =====================================================
+
+    // GET: Single Assignment Details
+    app.get("/assignments/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const assignment = await assignmentCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!assignment) {
+          return res.status(404).json({
+            success: false,
+            message: "Assignment not found",
+          });
+        }
+
+        // Get submission count for this assignment
+        const submissionCount = await submissionCollection.countDocuments({
+          assignmentId: new ObjectId(id),
+        });
+
+        res.json({
+          success: true,
+          assignment: { ...assignment, submissionCount },
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error fetching assignment",
+          error: error.message,
+        });
+      }
+    });
+
+    // PUT: Update Assignment
+    app.put("/assignments/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { title, description, deadline, maxPoints } = req.body;
+
+        const result = await assignmentCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              title,
+              description,
+              deadline,
+              maxPoints: maxPoints || 100,
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Assignment not found or no changes made",
+          });
+        }
+
+        res.json({
+          success: true,
+          message: "Assignment updated successfully",
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error updating assignment",
+          error: error.message,
+        });
+      }
+    });
+
+    // DELETE: Delete Assignment
+    app.delete("/assignments/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        // Get assignment to find classId
+        const assignment = await assignmentCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!assignment) {
+          return res.status(404).json({
+            success: false,
+            message: "Assignment not found",
+          });
+        }
+
+        // Delete all submissions for this assignment
+        await submissionCollection.deleteMany({
+          assignmentId: new ObjectId(id),
+        });
+
+        // Delete the assignment
+        await assignmentCollection.deleteOne({ _id: new ObjectId(id) });
+
+        // Decrement class assignment count
+        await classCollection.updateOne(
+          { _id: assignment.classId },
+          { $inc: { totalAssignments: -1 } }
+        );
+
+        res.json({
+          success: true,
+          message: "Assignment deleted successfully",
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error deleting assignment",
+          error: error.message,
+        });
+      }
+    });
+
+    // GET: All Submissions for an Assignment (Teacher View)
+    app.get("/assignments/:id/submissions", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const submissions = await submissionCollection
+          .aggregate([
+            { $match: { assignmentId: new ObjectId(id) } },
+            {
+              $lookup: {
+                from: "users",
+                localField: "userId",
+                foreignField: "uid",
+                as: "studentInfo",
+              },
+            },
+            {
+              $unwind: {
+                path: "$studentInfo",
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $project: {
+                _id: 1,
+                assignmentId: 1,
+                userId: 1,
+                submittedAt: 1,
+                status: 1,
+                submissionText: 1,
+                submissionUrl: 1,
+                grade: 1,
+                feedback: 1,
+                gradedAt: 1,
+                studentName: "$studentInfo.name",
+                studentEmail: "$studentInfo.email",
+                studentPhoto: "$studentInfo.photo",
+              },
+            },
+            { $sort: { submittedAt: -1 } },
+          ])
+          .toArray();
+
+        res.json({
+          success: true,
+          submissions,
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error fetching submissions",
+          error: error.message,
+        });
+      }
+    });
+
+    // PUT: Grade a Submission
+    app.put("/submissions/:id/grade", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { grade, feedback } = req.body;
+
+        const result = await submissionCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              grade: Number(grade),
+              feedback,
+              status: "graded",
+              gradedAt: new Date(),
+            },
+          }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Submission not found",
+          });
+        }
+
+        res.json({
+          success: true,
+          message: "Submission graded successfully",
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error grading submission",
+          error: error.message,
+        });
+      }
+    });
+
+    // GET: Student's All Submissions (across all assignments)
+    app.get("/students/:userId/submissions", async (req, res) => {
+      try {
+        const { userId } = req.params;
+
+        const submissions = await submissionCollection
+          .aggregate([
+            { $match: { userId } },
+            {
+              $lookup: {
+                from: "assignments",
+                localField: "assignmentId",
+                foreignField: "_id",
+                as: "assignmentInfo",
+              },
+            },
+            {
+              $unwind: {
+                path: "$assignmentInfo",
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $lookup: {
+                from: "classes",
+                localField: "assignmentInfo.classId",
+                foreignField: "_id",
+                as: "classInfo",
+              },
+            },
+            {
+              $unwind: {
+                path: "$classInfo",
+                preserveNullAndEmptyArrays: true,
+              },
+            },
+            {
+              $project: {
+                _id: 1,
+                assignmentId: 1,
+                submittedAt: 1,
+                status: 1,
+                submissionText: 1,
+                submissionUrl: 1,
+                grade: 1,
+                feedback: 1,
+                gradedAt: 1,
+                assignmentTitle: "$assignmentInfo.title",
+                assignmentDeadline: "$assignmentInfo.deadline",
+                maxPoints: "$assignmentInfo.maxPoints",
+                className: "$classInfo.title",
+                classId: "$classInfo._id",
+              },
+            },
+            { $sort: { submittedAt: -1 } },
+          ])
+          .toArray();
+
+        res.json({
+          success: true,
+          submissions,
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error fetching student submissions",
           error: error.message,
         });
       }
@@ -915,6 +1232,101 @@ app.put("/users/:id/update-role", async (req, res) => {
         res.status(500).json({
           success: false,
           message: "Error fetching all reviews",
+          error: error.message,
+        });
+      }
+    });
+
+    // =====================================================
+    // CLASS RESOURCES ENDPOINTS
+    // =====================================================
+
+    // POST: Create a Resource (Teacher shares material)
+    app.post("/classes/:id/resources", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { title, description, type, url, teacherId } = req.body;
+
+        if (!title || !url) {
+          return res.status(400).json({
+            success: false,
+            message: "Title and URL are required",
+          });
+        }
+
+        const resource = {
+          classId: new ObjectId(id),
+          title,
+          description: description || "",
+          type: type || "link", // link, document, video, image
+          url,
+          teacherId,
+          createdAt: new Date(),
+        };
+
+        const result = await resourceCollection.insertOne(resource);
+
+        res.status(201).json({
+          success: true,
+          message: "Resource added successfully",
+          resourceId: result.insertedId,
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error adding resource",
+          error: error.message,
+        });
+      }
+    });
+
+    // GET: Get All Resources for a Class
+    app.get("/classes/:id/resources", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const resources = await resourceCollection
+          .find({ classId: new ObjectId(id) })
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.json({
+          success: true,
+          resources,
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error fetching resources",
+          error: error.message,
+        });
+      }
+    });
+
+    // DELETE: Delete a Resource
+    app.delete("/resources/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const result = await resourceCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({
+            success: false,
+            message: "Resource not found",
+          });
+        }
+
+        res.json({
+          success: true,
+          message: "Resource deleted successfully",
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          message: "Error deleting resource",
           error: error.message,
         });
       }
